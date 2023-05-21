@@ -1,0 +1,396 @@
+<head>
+    <script src="https://cdn.plot.ly/plotly-2.20.0.min.js" charset="utf-8"></script>
+</head>
+<img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/c1/Yaw_Axis_Corrected.svg/250px-Yaw_Axis_Corrected.svg.png"
+    width="250" height="188">
+<style>
+    html,
+    body {
+        width: 100%;
+        margin: 0;
+        /* mono font */
+        font-family: 'Courier New', Courier, monospace;
+    }
+
+    #myDiv {
+        width: 100%;
+    }
+
+    #level_angle_x,
+    #level_angle_y,
+    #compass_azimuth {
+        color: red;
+        font-weight: bold;
+    }
+    #h_plane_x_roll,
+    #h_plane_x_pitch,
+    #h_plane_x_azimuth {
+        color: blue;
+        font-weight: bold;
+    }
+
+    .input-container {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+    }
+
+    .input-container>input {
+        flex-grow: 1;
+        width: auto;
+    }
+</style>
+<a> Yaw -> Pitch -> Roll</a>
+<!-- html, input with slider bar, show text, for roll pitch yaw  -->
+<div class="input-container">
+    <label for="yaw">Yaw:&nbsp;&nbsp;</label>
+    <button
+        onclick="document.getElementById('yaw').stepDown();updateYaw(document.getElementById('yaw').value)">-</button>
+    <input type="range" id="yaw" min="0" max="360" value="45" oninput="updateYaw(this.value)"
+        onchange="updateYaw(this.value)">
+    <span id="yawValue">0</span>
+    <button onclick="document.getElementById('yaw').stepUp();updateYaw(document.getElementById('yaw').value)">+</button>
+</div>
+<div class="input-container">
+    <label for="pitch">Pitch:</label>
+    <button
+        onclick="document.getElementById('pitch').stepDown();updatePitch(document.getElementById('pitch').value)">-</button>
+    <input type="range" id="pitch" min="-180" max="180" value="-62" oninput="updatePitch(this.value)"
+        onchange="updatePitch(this.value)">
+    <span id="pitchValue">0</span>
+    <button
+        onclick="document.getElementById('pitch').stepUp();updatePitch(document.getElementById('pitch').value)">+</button>
+</div>
+<div class="input-container">
+    <label for="roll">Roll:&nbsp;</label>
+    <!-- minus button -->
+    <button
+        onclick="document.getElementById('roll').stepDown();updateRoll(document.getElementById('roll').value)">-</button>
+    <input type="range" id="roll" min="-180" max="180" value="45" oninput="updateRoll(this.value)"
+        onchange="updateRoll(this.value)">
+    <span id="rollValue">0</span>
+    <!-- plus button -->
+    <button
+        onclick="document.getElementById('roll').stepUp();updateRoll(document.getElementById('roll').value)">+</button>
+</div>
+
+
+<!-- level angle -->
+<div>
+    <div> Level Angle</div>
+    <label for="level_angle_x">X:</label>
+    <span id="level_angle_x">0</span>
+    <label for="level_angle_y">Y:</label>
+    <span id="level_angle_y">0</span>
+    <div>
+        <label for="compass_azimuth">Compass Azimuth:</label>
+        <span id="compass_azimuth">0</span>
+    </div>
+</div>
+<div>
+    H-Plane-X    
+    <label for="h_plane_x_pitch">Pitch:</label>
+    <span id="h_plane_x_pitch">0</span>
+    <label for="h_plane_x_roll">Roll:</label>
+    <span id="h_plane_x_roll">0</span>
+    <label for="h_plane_x_azimuth">Azimuth:</label>
+    <span id="h_plane_x_azimuth">0</span>
+</div>
+
+<div id="tester" style="width:1px;height:20px;"></div>
+<div id="myDiv" style=height:900px;"></div>
+
+
+<script>
+
+    function deg2rad(deg) {
+        return deg * (Math.PI / 180);
+    }
+    function rotationMatrixFromEulerAngles(roll, pitch, yaw, degrees = true) {
+        // cg: fix yaw direction
+        yaw = -yaw;
+        pitch = -pitch;
+        roll = -roll;
+
+        if (degrees) {
+            roll = deg2rad(roll);
+            pitch = deg2rad(pitch);
+            yaw = deg2rad(yaw);
+        }
+        const cy = Math.cos(yaw);
+        const sy = Math.sin(yaw);
+        const cp = Math.cos(pitch);
+        const sp = Math.sin(pitch);
+        const cr = Math.cos(roll);
+        const sr = Math.sin(roll);
+
+        const rotationMatrix = [
+            [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+            [-sp, cp * sr, cp * cr],
+        ];
+
+        return rotationMatrix;
+    }
+    function transform(rot_mat, vec) {
+        // # transform vector by rotation matrix
+        // # rot_mat: rotation matrix
+        // # vec: vector to be transformed
+        // # return: transformed vector
+        return [
+            rot_mat[0][0] * vec[0] + rot_mat[0][1] * vec[1] + rot_mat[0][2] * vec[2],
+            rot_mat[1][0] * vec[0] + rot_mat[1][1] * vec[1] + rot_mat[1][2] * vec[2],
+            rot_mat[2][0] * vec[0] + rot_mat[2][1] * vec[1] + rot_mat[2][2] * vec[2]
+        ];
+    }
+</script>
+
+<script>
+    function level_angle(vec) {
+        // # angle between h_plane_x and z-axis
+        return (Math.acos(vec[2] / Math.sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2])) * 180 / Math.PI) - 90;
+    }
+
+    function plot_line_text(plot_data, coord_xyz_array, text, color, size = 10) {
+        plot_data.push({
+            type: "scatter3d",
+            x: [coord_xyz_array[0]],
+            y: [coord_xyz_array[1]],
+            z: [coord_xyz_array[2]],
+            text: [text],
+            mode: "text",
+            textposition: "",
+            textfont: {
+                // family: "Raleway, sans-serif",
+                size: size,
+                color: color
+            },
+            name: text
+        });
+        plot_data.push({
+            type: "scatter3d",
+            x: [0, coord_xyz_array[0]],
+            y: [0, coord_xyz_array[1]],
+            z: [0, coord_xyz_array[2]],
+            mode: "lines",
+            line: {
+                width: 2,
+                color: color
+            },
+            name: text
+        })
+    }
+
+    Plotly.newPlot('tester', [{
+        x: [1, 2, 3, 4, 5],
+        y: [1, 2, 4, 8, 16]
+    }], {
+        margin: { t: 0 }
+    });
+    // Plotly.newPlot('tester2', [{
+    //     type: "mesh3d",
+    //     x: [0, 0, 1],
+    //     y: [0, 1, 0],
+    //     z: [0, 0, 2],
+    //     color: 'rgb(200,100,300)',
+    // }]);
+
+    const sqrt2 = Math.sqrt(2);
+    function updateDisplay() {
+        var roll = document.getElementById("roll").value;
+        var pitch = document.getElementById("pitch").value;
+        var yaw = document.getElementById("yaw").value;
+        // js code to calculate rotation matrix from Euler angles: roll, pitch, yaw
+        var rot_mat = rotationMatrixFromEulerAngles(roll, pitch, yaw, degrees = true);
+
+        console.log(roll, pitch, yaw);
+        console.log(rot_mat);
+        // array([[ 0.33196653, -0.9414738 ,  0.0585262 ],
+        //    [ 0.33196653,  0.0585262 , -0.9414738 ],
+        //    [ 0.88294759,  0.33196653,  0.33196653]])
+
+        let data = [];
+        let layout = [];
+
+        // add Notrh, East, Up points
+        data.push({
+            type: "scatter3d",
+            mode: "markers+text",
+            x: [1, 0, 0],
+            y: [0, -1, 0],
+            z: [0, 0, 1],
+            text: ['North', 'East', 'Up'],
+            marker: {
+                size: 8,
+                color: 'red'
+            }
+        });
+        let axis_range = 1.2;
+        layout = {
+            scene: {
+                aspectmode: 'cube',
+                // xaxis: { range: [-2, 2] },
+                // yaxis: { range: [-2, 2] },
+                // zaxis: { range: [-2, 2] }
+                xaxis: { range: [-axis_range, axis_range] },
+                yaxis: { range: [-axis_range, axis_range] },
+                zaxis: { range: [-axis_range, axis_range] }
+            },
+            margin: {
+                l: 0,  // left margin
+                r: 0,  // right margin
+                b: 0,  // bottom margin
+                t: 0   // top margin
+            },
+            // legend: {     
+            //     yanchor: "top",
+            // }
+            showlegend: false,
+            uirevision: 'same',
+        };
+
+        // init dihedral
+        // data.push({
+        //     // type: "mesh3d",
+        //     type: "scatter3d",
+        //     x:[-0.5,-0.5, 0.5,0.5, 0.5,-0.5],
+        //     y:[0,1/sqrt2,1/sqrt2,0,1/sqrt2,1/sqrt2],
+        //     z:[0, -1/sqrt2, -1/sqrt2,0, 1/sqrt2, 1/sqrt2],
+        // });
+        // const dihedral_init_pos = {
+        //     x: [0, 1 / sqrt2, 1 / sqrt2, 0, 1 / sqrt2, 1 / sqrt2],
+        //     y: [-0.5, -0.5, 0.5, 0.5, 0.5, -0.5],
+        //     z: [0, -1 / sqrt2, -1 / sqrt2, 0, 1 / sqrt2, 1 / sqrt2],
+        // }
+        const dihedral_init_pos = [[0, -0.5, 0], [
+            1 / sqrt2, -0.5, -1 / sqrt2],
+        [1 / sqrt2, 0.5, -1 / sqrt2],
+        [0, 0.5, 0],
+        [1 / sqrt2, 0.5, 1 / sqrt2],
+        [1 / sqrt2, -0.5, 1 / sqrt2]];
+
+        const dihedral_face = [[0, 0, 3, 0], [1, 2, 4, 3], [2, 3, 5, 5]];
+        const h_plane_scale = 1.2;
+        const h_plane_x = [1 / sqrt2 * h_plane_scale, 0, -1 / sqrt2 * h_plane_scale];
+        const h_plane_y = [0, 1 * h_plane_scale, 0];
+
+        data.push({
+            type: "mesh3d",
+            // type: "scatter3d",
+            x: dihedral_init_pos.map(x => x[0]),
+            y: dihedral_init_pos.map(x => x[1]),
+            z: dihedral_init_pos.map(x => x[2]),
+            i: dihedral_face[0],
+            j: dihedral_face[1],
+            k: dihedral_face[2],
+            color: 'rgb(200,100,200)',
+            opacity: 0.5
+        });
+
+        plot_line_text(data, h_plane_x, 'h_plane_x', 'red');
+        plot_line_text(data, h_plane_y, 'h_plane_y', 'green');
+
+        let h_plane_x_rot = transform(rot_mat, h_plane_x);
+        let h_plane_y_rot = transform(rot_mat, h_plane_y);
+        plot_line_text(data, h_plane_x_rot, 'h_plane_x_rot', 'red', size = 20);
+        plot_line_text(data, h_plane_y_rot, 'h_plane_y_rot', 'green', size = 20);
+
+        let dihedral_rot_pos = dihedral_init_pos.map(x => transform(rot_mat, x));
+
+        data.push({
+            type: "mesh3d",
+            // type: "scatter3d",
+            x: dihedral_rot_pos.map(x => x[0]),
+            y: dihedral_rot_pos.map(x => x[1]),
+            z: dihedral_rot_pos.map(x => x[2]),
+            i: dihedral_face[0],
+            j: dihedral_face[1],
+            k: dihedral_face[2],
+            color: 'rgb(0,0,200)',
+            opacity: 0.8
+        });
+
+        let angle_x_rot = level_angle(h_plane_x_rot);
+        let angle_y_rot = level_angle(h_plane_y_rot);
+        let compass_azimuth = Math.atan2(-h_plane_x_rot[1], -h_plane_x_rot[0]) * 180 / Math.PI;
+        if (compass_azimuth < 0) {
+            compass_azimuth += 360;
+        }
+        //cg: fix
+        compass_azimuth = 360 - compass_azimuth;
+        document.getElementById("level_angle_x").innerText = angle_x_rot.toFixed(1);
+        document.getElementById("level_angle_y").innerText = angle_y_rot.toFixed(1);
+        document.getElementById("compass_azimuth").innerText = compass_azimuth.toFixed(1);
+
+        // angle between h_plane_x_roll and x-y plane
+        let h_plane_x_pitch_angle = Math.atan2(-h_plane_x_rot[2], Math.sqrt(h_plane_x_rot[0] ** 2 + h_plane_x_rot[1] ** 2)) * 180 / Math.PI;
+        document.getElementById("h_plane_x_pitch").innerText = h_plane_x_pitch_angle.toFixed(1);
+
+        // let h_palne_x_roll_angle = 
+        // vector cross product: [h_plane_x_rot[0], h_plane_x_rot[1], 0 ] x [0, 0, 1]
+        let vector_cross = [h_plane_x_rot[1], -h_plane_x_rot[0], 0];
+        // vector_cross_norm = Math.sqrt(vector_cross[0] ** 2 + vector_cross[1] ** 2);
+        // vector_cross = vector_cross.map(x => x / vector_cross_norm);
+        // let xxx = Math.sqrt(h_plane_y_rot[0] ** 2 + h_plane_y_rot[1] ** 2+ h_plane_y_rot[2] ** 2);
+
+        // angle between h_plane_y_rot and vector_cross
+        // xxx let h_plane_x_roll_angle = Math.atan2(h_plane_y_rot[2], vector_cross[0] * h_plane_y_rot[0] + vector_cross[1] * h_plane_y_rot[1]) * 180 / Math.PI;
+
+        // angle between vector_cross and h_plane_y_rot
+        let h_plane_x_roll_angle = Math.acos((vector_cross[0]*h_plane_y_rot[0] + vector_cross[1]*h_plane_y_rot[1])/
+            (Math.sqrt(vector_cross[0]**2+vector_cross[1]**2)*Math.sqrt(h_plane_y_rot[0]**2+h_plane_y_rot[1]**2+ h_plane_y_rot[2]**2))    
+        ) * 180 / Math.PI;
+        // let xxx = vector_cross[0]*h_plane_y_rot[0] + vector_cross[1]*h_plane_y_rot[1]
+        h_plane_x_roll_angle = 180 - h_plane_x_roll_angle;
+
+        document.getElementById("h_plane_x_roll").innerText = h_plane_x_roll_angle.toFixed(1);
+        document.getElementById("h_plane_x_azimuth").innerText = compass_azimuth.toFixed(1);
+        // Plotly.newPlot('myDiv', data, layout);
+        Plotly.react('myDiv', data, layout);
+    }
+</script>
+
+<script>
+    function debounce(func, wait, immediate) {
+        var timeout;
+        return function () {
+            var context = this,
+                args = arguments;
+            clearTimeout(timeout);
+            timeout = setTimeout(function () {
+                timeout = null;
+                if (!immediate) func.apply(context, args);
+            }, wait);
+            if (immediate && !timeout) func.apply(context, args);
+        };
+    };
+
+    let debounced_updateDisplay = debounce(updateDisplay, 50);
+
+    document.getElementById("roll").value = 45;
+    document.getElementById("pitch").value = 62;
+    document.getElementById("yaw").value = 360-11;
+
+    function updateRoll(value) {
+        document.getElementById("rollValue").innerHTML = value;
+        // updateDisplay();
+        debounced_updateDisplay();
+    }
+
+    function updatePitch(value) {
+        document.getElementById("pitchValue").innerHTML = value;
+        // updateDisplay();
+        debounced_updateDisplay();
+    }
+
+    function updateYaw(value) {
+        document.getElementById("yawValue").innerHTML = value;
+        // updateDisplay();
+        debounced_updateDisplay();
+    }
+    updateRoll(document.getElementById("roll").value);
+    updatePitch(document.getElementById("pitch").value);
+    updateYaw(document.getElementById("yaw").value);
+
+</script>
